@@ -66,6 +66,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
         os: ['macos-latest', 'ubuntu-latest']
         # https://endoflife.date/python
