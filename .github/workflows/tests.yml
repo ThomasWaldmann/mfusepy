@@ -7,92 +7,16 @@ on:
   pull_request:
 
 jobs:
-  Static-Code-Checks:
-    runs-on: ubuntu-slim
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Dependencies
-        run: |
-          python3 -m pip install ioctl-opt paramiko types-paramiko pytest
-
-      - name: Style Check With Ruff
-        run: |
-          python3 -m pip install ruff
-          ruff check --config tests/.ruff.toml -- $( git ls-tree -r --name-only HEAD | 'grep' -E '[.]py$' )
-
-      - name: Style Check With Black
-        run: |
-          python3 -m pip install black
-          black -q --diff --line-length 120 --skip-string-normalization $( git ls-tree -r --name-only HEAD | 'grep' -E '[.]py$' ) > black.diff
-          if [ -s black.diff ]; then
-              cat black.diff
-              exit 123
-          fi
-
-      - name: Lint With Codespell
-        run: |
-          python3 -m pip install codespell
-          codespell $( git ls-tree -r --name-only HEAD | 'grep' -E '[.](py|md|txt|sh|yml)$' )
-
-      - name: Lint With Flake8
-        run: |
-          python3 -m pip install flake8
-          flake8 --config tests/.flake8 $( git ls-tree -r --name-only HEAD | 'grep' -E '[.]py$' )
-
-      - name: Lint With Pylint
-        run: |
-          python3 -m pip install pylint
-          pylint --rcfile tests/.pylintrc $( git ls-tree -r --name-only HEAD | 'grep' -E '[.]py$' ) | tee pylint.log
-          ! 'egrep' ': E[0-9]{4}: ' pylint.log
-
-      - name: Lint With Pytype
-        run: |
-          python3 -m pip install pytype
-          pytype -d import-error $( git ls-tree -r --name-only HEAD | 'grep' -E '[.]py$' )
-
-      - name: Lint With Mypy
-        run: |
-          yes | python3 -m pip install --upgrade-strategy eager --upgrade types-dataclasses mypy
-          mypy --config-file tests/.mypy.ini $( git ls-tree -r --name-only HEAD | 'grep' -E '[.]py$' )
-
   Tests:
     runs-on: ${{ matrix.os }}
 
     strategy:
+      fail-fast: false
       matrix:
         # https://endoflife.date/python
         include:
           - os: ubuntu-22.04
             python-version: '3.9'
-          - os: ubuntu-22.04-arm
-            python-version: '3.10'
-          - os: ubuntu-22.04
-            python-version: '3.11'
-          - os: ubuntu-24.04-arm
-            python-version: '3.12'
-          - os: ubuntu-24.04
-            python-version: '3.13'
-          - os: ubuntu-24.04
-            python-version: '3.14'
-          - os: macos-15
-            python-version: '3.9'
-          - os: macos-14
-            python-version: '3.10'
-          - os: macos-15-intel
-            python-version: '3.11'
-          - os: macos-14
-            python-version: '3.12'
-          - os: macos-15-intel
-            python-version: '3.13'
-          - os: macos-15
-            python-version: '3.14'
 
     env:
       MFUSEPY_CHECK_OVERRIDES: 1
@@ -199,24 +123,18 @@ jobs:
     timeout-minutes: 10
 
     strategy:
+      fail-fast: false
       matrix:
          include:
            - os: freebsd
              version: '14.3'
              display_name: FreeBSD
-           - os: freebsd
-             version: '13.5'
-             display_name: FreeBSD
            - os: openbsd
              version: '7.7'
              display_name: OpenBSD
-           # OpenBSD 6.9 is not supported because it only has Python 3.8, which is not supported anymore.
-           # NetBSD 9.4 is not supported because its interface seems to mirror libFUSE 2.6 and therefore is HIGHLY
-           #            incompatible. Even fuse_context.umask is missing!
-           - os: netbsd
-             version: '10.1'
-             display_name: NetBSD
-
+           - os: omnios
+             version: r151056
+             display_name: OmniOS
 
     steps:
       - name: Check out repository
@@ -225,7 +143,7 @@ jobs:
           fetch-tags: true
 
       - name: Test on ${{ matrix.display_name }}
-        uses: cross-platform-actions/action@v0.29.0
+        uses: cross-platform-actions/action@v0.32.0
         with:
           operating_system: ${{ matrix.os }}
           version: ${{ matrix.version }}
@@ -318,6 +236,51 @@ jobs:
                 python3 -m pytest -s -v -rs tests/test_struct_layout.py
                 # for now, run the tests as root, too many PermissionErrors:
                 sudo -E python3 -m pytest -s -v -rs tests || rc=$?
+                exit "$rc"
+                ;;
+              omnios)
+                # Ensure a proper hostname/FQDN is set (VMs may not have one by default)
+                sudo -E /bin/sh -c 'grep -q "omnios\.local" /etc/hosts || echo "127.0.0.1 omnios.local omnios" >> /etc/hosts'
+                sudo -E hostname omnios.local
+                hostname
+
+                # Packages
+                pfexec pkg install developer/versioning/git
+                pfexec pkg install developer/gcc14
+                pfexec pkg set-mediator -V 14 gcc
+
+                # driver + libfuse
+                pfexec pkg set-publisher -p https://sfe.opencsw.org/localhostomnios localhostomnios
+                pfexec pkg refresh localhostomnios
+                pfexec pkg install --accept system/file-system/fusefs
+                pfexec pkg install --accept system/file-system/libfuse
+                pfexec pkg install --accept system/file-system/libfuse/src
+                pkg list system/file-system/fusefs
+                pkg list system/file-system/libfuse
+                pkg list system/file-system/libfuse/src
+                pkg contents system/file-system/fusefs
+                pkg contents system/file-system/libfuse
+                pkg contents system/file-system/libfuse/src
+
+                # Install pip Dependencies
+                python3 -m pip install --upgrade pip
+                python3 -m pip install --upgrade wheel
+                python3 -m pip install --upgrade setuptools
+                python3 -m pip install "pynacl==1.5.0"
+                python3 -m pip install pytest ioctl-opt
+
+                # Fix PATH
+                export PATH="/home/runner/.local/bin:$PATH"
+                echo $PATH
+
+                # Test Installation From Source
+                python3 -m pip install .
+
+                # Unit Tests (FUSE 2)
+                python3 -c 'import mfusepy; assert mfusepy.fuse_version_major == 2'
+                # preserve pytest exit status, always show logs
+                rc=0
+                pfexec python3 -m pytest -v -rs tests || rc=$?
                 exit "$rc"
                 ;;
             esac

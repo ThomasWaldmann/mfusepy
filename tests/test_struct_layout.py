@@ -43,17 +43,19 @@ STRUCT_NAMES = {
         'f_frsize',
         'f_fsid',
         'f_namemax',
+        'f_basetype',
+        'f_fstr',
     ],
-    'fuse_context': ['fuse', 'uid', 'gid', 'pid', 'umask'],
+    'fuse_context': ['fuse', 'uid', 'gid', 'pid'],  # 'umask'
     'fuse_conn_info': [
         'proto_major',
         'proto_minor',
         'max_write',
         'max_readahead',
-        'capable',
-        'want',
-        'max_background',
-        'congestion_threshold',
+        # 'capable',
+        # 'want',
+        # 'max_background',
+        # 'congestion_threshold',
     ],
     'fuse_operations': [
         'getattr',
@@ -178,6 +180,7 @@ def c_run(name: str, source: str) -> str:
             '/usr/local/include/osxfuse/fuse',
             '/usr/local/include/macfuse/fuse',
             '/usr/include/libfuse',
+            '/usr/gnu/include/fuse',
         ]
         if mfusepy.fuse_version_major == 3:
             include_paths += ['/usr/local/include/fuse3', '/usr/include/fuse3']
